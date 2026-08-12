@@ -82,6 +82,142 @@ Se um formato passar a ser suportado depois de uma execução, a retomada
 reavalia sozinha os documentos que estavam como ⚠️ *formato não suportado* —
 não é preciso apagar o checkpoint.
 
+## Quanto disso está certo? — `validar.py`
+
+O `resultados.jsonl` diz o que a tool **decidiu**; não diz se ela **acertou**.
+Acurácia não sai de dentro da tool: qualquer número que ela calcule sobre si
+mesma é a mesma opinião que se quer auditar. Precisa de rótulo humano — e
+[`validar.py`](validar.py) existe para que ele custe o mínimo possível.
+
+```bash
+# 1) sorteia a amostra e gera as imagens a rotular
+poc-assinatura$ .venv/Scripts/python validar.py amostrar
+
+# 2) rotule no navegador: S = tem assinatura, N = não tem, D = dúvida
+poc-assinatura$ .venv/Scripts/python validar.py rotular
+
+# 3) cruza rótulo × veredito e escreve o relatório
+poc-assinatura$ .venv/Scripts/python validar.py avaliar
+```
+
+Aponte `--resultados` para a pasta do lote se ela não for `resultados/`.
+
+**`files/` nunca é escrito.** A imagem que aparece no rotulador é uma folha de
+contato **renderizada** em `auditoria/amostra/pendentes/`; rotular apenas a
+vincula em `com_assinatura/`, `sem_assinatura/` ou `duvida/` (`os.link`, ou cópia
+quando o sistema de arquivos não permite vínculo) sem tirá-la de `pendentes/`.
+Nada do seu dataset se move.
+
+### O rotulador (`validar.py rotular`)
+
+Um servidor `http.server` em `127.0.0.1` — só `stdlib`, nada exposto na rede — e
+uma página com um documento por vez:
+
+| Tecla | |
+|---|---|
+| **S** | tem assinatura |
+| **N** | não tem |
+| **D** | dúvida |
+| **←** / **→** | volta / pula sem rotular |
+| clique na imagem | alterna entre caber na tela e tamanho natural (para conferir rubrica fina) |
+
+**Cada clique grava na hora**, na pasta e no `rotulos.jsonl`: não há botão de
+salvar e não há trabalho para perder se o navegador fechar. Reabrir continua na
+primeira imagem sem rótulo, e a barra de progresso diz quantas faltam.
+
+A fila é **embaralhada** de propósito: em ordem de índice os ✅ e os ❌ sairiam em
+blocos, e depois de dez seguidos o rotulador passa a adivinhar em vez de olhar. A
+página recebe **só o id** da imagem — nem caminho, nem estrato, nem o veredito da
+tool. Mudar de ideia é só voltar e apertar outra tecla; a última decisão vence.
+
+Se preferir, mover os arquivos na mão entre as pastas continua funcionando: a
+pasta é o rótulo, e é ela que o `avaliar` lê.
+
+### A régua, que precisa estar combinada antes de começar
+
+Ambiguidade aqui estraga a métrica mais do que qualquer tamanho de amostra.
+
+| Tecla / pasta | |
+|---|---|
+| **S** · `com_assinatura` | rubrica manuscrita (caneta, escaneada ou desenhada) em qualquer página, **ou** carimbo de assinatura digital. Rubrica ilegível ou parcial conta |
+| **N** · `sem_assinatura` | campo vazio, linha pontilhada, "Assinatura: ______", nome apenas digitado |
+| **D** · `duvida` | não deu para decidir — sai do denominador e é reportado à parte |
+
+Se a fração em `duvida/` passar de 5%, o relatório sai com ressalva: nesse
+volume, o problema costuma ser a régua ou a resolução da imagem, não a tool.
+
+### O que sai em `auditoria/`
+
+| Arquivo | Conteúdo |
+|---|---|
+| `VALIDACAO.md` | acurácia, precisão, recall, especificidade, **VPN**, F1 — cada uma com IC 95% de Wilson — matriz de confusão e a tabela de **onde o erro está** |
+| `VALIDACAO.json` | o mesmo, para comparar duas execuções |
+| `rotulos.jsonl` | o ativo: `sha256` + veredito humano, uma linha por decisão (a última de cada `sha256` vence). **Sem caminho de arquivo**, então é versionável e sobrevive a reorganização de `files/` |
+| `indice.jsonl` | a amostra sorteada, documento a documento |
+| `hashes.jsonl` | cache de sha256 (incremental — a primeira execução lê o lote inteiro) |
+| `amostragem.json` | o desenho da amostra: semente, orçamentos, piso por estrato |
+| `amostra/` | as folhas de contato, distribuídas nas quatro pastas de rotulagem |
+
+### Por que a conta fecha com pouco trabalho humano
+
+**Rótulo por conteúdo, não por arquivo.** Medido no lote de 72 mil: os 15.913
+documentos ❌ são apenas **3.423 sha256 distintos** — 4,7× de duplicação (o mesmo
+PDF repetido em dezenas de pastas de trabalhador, mais os `_1`/`_2`). 476
+decisões humanas cobrem metade daquele universo; 3.423 o cobrem inteiro. O
+rótulo é gravado por hash e herdado por todas as cópias.
+
+O sha256 é calculado de verdade, não aproximado: o proxy barato
+`(tamanho, formato, páginas)` daria 2.891 grupos contra 3.423 hashes reais —
+ele **funde arquivos diferentes**, e isso propagaria rótulo errado.
+
+**Contagem por documento, amostra por estrato.** O sorteio é de documentos
+(conteúdo repetido 96 vezes tem 96 vezes mais chance de entrar, que é o peso
+dele no lote), dentro de estratos tirados de campos que o checkpoint já tem:
+
+| Estrato | Por que existe |
+|---|---|
+| ❌ truncado em `--max-paginas` | o Nível 1 **não olhou** as páginas restantes — cegueira garantida |
+| ❌ todas as páginas em branco | verdadeiro negativo quase certo |
+| ❌ `.docx`/`.pptx` | limite conhecido do `w:ink`/EMF |
+| ❌ imagem · ❌ PDF de 1, 2, 3+ páginas | volume |
+| ✅ resgatado pelo fallback 3×3 | 9 inferências por página, 9× mais chances de disparar → maior risco de falso positivo |
+| ✅ só Nível 1, uma única detecção | evidência mais fraca do lote |
+| ✅ só Nível 1, duas ou mais · ✅ com Nível 0 | verdadeiro positivo provável |
+
+Estrato pequeno e perigoso recebe um piso de 20 documentos
+(`--minimo-por-estrato`), senão receberia 2 na proporcional e não diria nada
+sobre si mesmo. Esse oversampling **não** enviesa o total: na hora de somar, as
+células de cada estrato são multiplicadas por `N_estrato / rotulados_no_estrato`,
+o que reconstrói a matriz do lote inteiro.
+
+**A rotulagem é cega.** A imagem se chama pelo hash, positivos e negativos caem
+na mesma pilha e nada indica o que a tool decidiu — rotulador influenciado pelo
+veredito não mede nada. Por isso `validar.py` nunca carrega os pesos ONNX: não
+há detecção para rodar aqui.
+
+### Quanto amostrar
+
+| n por lado | IC 95% (pior caso, p=0,5) |
+|---|---|
+| 200 | ±6,9% |
+| 400 | ±4,9% |
+| 600 | ±3,9% |
+| 1.000 | ±3,1% |
+
+O default é 200+200 (~1h de rotulagem) — o suficiente para saber se a PoC está
+em 95% ou em 70%. Suba para 600+600 quando o número for para apresentação.
+Aumentar o orçamento **preserva** a amostra anterior: a mesma semente embaralha
+e corta, então a amostra maior contém a menor e nenhum rótulo já feito se perde.
+
+### O ganho que fica
+
+`rotulos.jsonl` é um golden set permanente, chaveado por conteúdo. Mexeu em
+`--conf`, trocou o modelo, desligou o fallback? Rode o lote e
+`validar.py avaliar` de novo: precisão e recall se movem contra os **mesmos**
+rótulos. É o que responde "essa mudança melhorou?" — hoje não há como saber se
+`--conf 0.15` é melhor que `0.25` neste corpus, só que foi melhor em 17
+documentos.
+
 ## Interrompeu? Rode de novo
 
 O `resultados.jsonl` é gravado documento a documento, com `flush`. Ctrl+C, queda
@@ -159,8 +295,10 @@ a instrução — em vez de rodar o lote inteiro e devolver "0 assinaturas no N�
 
 | Pasta | Papel |
 |---|---|
-| [`processar.py`](processar.py) | entrada da linha de comando |
+| [`processar.py`](processar.py) | entrada da linha de comando do lote |
 | [`processamento/`](processamento/) | descoberta e adaptação de formato, execução do lote, amostragem de hardware, relatórios |
+| [`validar.py`](validar.py) | entrada da linha de comando da auditoria de acurácia |
+| [`validacao/`](validacao/) | sha256, estratos, sorteio e folhas de contato (`amostra.py`); rotulador local (`rotulagem.py`); matriz de confusão, Wilson e `VALIDACAO.md` (`metricas.py`) |
 | [`tool_validar_assinatura/`](tool_validar_assinatura/) | a tool de detecção (Nível 0 + Nível 1) |
 | [`compat/`](compat/) | recorte das funções do `motor_ia` que a tool importa — existe só porque esta cópia roda fora do repositório do motor-ia. Com o pacote real instalado, é ele que vence |
 | [`tests/`](tests/) | testes da plataforma (`.venv/Scripts/python -m pytest tests -q`) |

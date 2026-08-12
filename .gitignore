@@ -13,11 +13,14 @@ files/
 doc*.old/
 
 # Saídas do lote (checkpoint, relatórios, logs, lock)
-resultados/
-resultados-negativos/
-resultados-amostra/
-resultados_20k_docs/
+resultados*/
 tool_validar_assinatura/resultados/
+
+# Auditoria de acurácia: imagens e caminhos de arquivo ficam locais, mas os
+# rótulos humanos são o ativo do projeto (só sha256 + veredito, sem nome de
+# trabalhador) e vão para o repositório.
+auditoria/*
+!auditoria/rotulos.jsonl
 
 # Pesos do modelo (~42 MB) — ver README para obter/apontar via --modelo
 tool_validar_assinatura/models/
