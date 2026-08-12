@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Documentos de entrada — dados reais, nunca versionar
+files/
+doc*.old/
+
+# Saídas do lote (checkpoint, relatórios, logs, lock)
+resultados/
+resultados-negativos/
+resultados-amostra/
+resultados_20k_docs/
+tool_validar_assinatura/resultados/
+
+# Pesos do modelo (~42 MB) — ver README para obter/apontar via --modelo
+tool_validar_assinatura/models/
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+*.Identifier

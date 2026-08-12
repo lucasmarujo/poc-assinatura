@@ -1,0 +1,16 @@
+no projeto motor-ia
+
+no fluxo de analise documental de requisitos 
+de fornecedores, e trabalhadores
+
+tinha uma tool `validar_assinatura` que usa o signatures da aws pra detecção de assinatura nos documentos, porem o custo de manter essa tool chamando o signatures é insustentavel devido ao volume de documentos que são processados em produção, a quantidade é absurda fazendo com que o custo seja muito alto 
+
+dentro dessa poc /home/lucas/greenlegis-hub/greenia/apis/motor-ia/poc-assinatura/tool_validar_assinatura vc vai:
+
+Refatorar a tool `validar_assinatura` para funcionar da seguinte maneira, para validação da PoC: nesta PoC não vamos usar o Textract, apenas o Nível 0 em Python puro (checar campos de assinatura digital `/Sig` no AcroForm do PDF, camada de texto em busca de indícios de assinatura, densidade de tinta e descarte de páginas em branco) e o Nível 1 com o modelo do Tech4Humans (`tech4humans/yolov8s-signature-detector`) rodando via ONNX Runtime em CPU. Dentro da pasta da PoC, criar os scripts Python da tool funcionando dessa nova maneira — ou seja, vai ter a tool nesse novo formato e vai ter também um script separado para fazer o teste dessa abordagem nos documentos, usando os documentos PDF fornecidos na pasta dos documentos.
+
+no path /home/lucas/greenlegis-hub/greenia/apis/motor-ia/poc-assinatura/doc trabalhadores tem os documentos que precisam ser validados com essa poc
+
+o script de teste nesses documentos, deve gerar no final, um md com todos os resultados, contendo uma tabela que exibe o titulo de cada documento, e quantas assinaturas foram detectadas pelo nivel 0, e pelo nivel 1
+
+o escopo completo desta tarefa, se limita apenas nas pastas que eu falei, vc nao vai alterar mais nada do projeto alem dessas pastas dessa poc, para os scripts vc pode usar os imports e reutilizar coisas que ja estao na aplicacao do motoria
