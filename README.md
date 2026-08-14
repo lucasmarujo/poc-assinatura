@@ -98,6 +98,9 @@ poc-assinatura$ .venv/Scripts/python validar.py rotular
 
 # 3) cruza rótulo × veredito e escreve o relatório
 poc-assinatura$ .venv/Scripts/python validar.py avaliar
+
+# 4) abre a triagem: cada erro com a imagem ao lado da evidência da tool
+poc-assinatura$ .venv/Scripts/python validar.py erros
 ```
 
 Aponte `--resultados` para a pasta do lote se ela não for `resultados/`.
@@ -132,6 +135,87 @@ tool. Mudar de ideia é só voltar e apertar outra tecla; a última decisão ven
 
 Se preferir, mover os arquivos na mão entre as pastas continua funcionando: a
 pasta é o rótulo, e é ela que o `avaliar` lê.
+
+### A triagem dos erros (`validar.py erros`)
+
+O `VALIDACAO.md` diz **quantos** erros existem e em que estrato; ele não diz
+**qual** foi o erro. `validar.py erros` escreve `auditoria/ERROS.html` — um
+arquivo estático, aberto com duplo clique — com um cartão por conteúdo rotulado:
+a folha de contato que foi rotulada, o rótulo dado, o veredito da tool e a
+evidência que sustentou esse veredito.
+
+| No cartão | |
+|---|---|
+| Nível 0 — AcroForm `/Sig` | sim/não: assinatura criptográfica embutida no PDF |
+| Nível 0 — carimbo digital | sim/não: "Assinado digitalmente por…" na camada de texto |
+| Nível 1 | quantas detecções visuais, e quantas páginas foram ao fallback 3×3 |
+| Páginas | quantas o documento tem, quantas chegaram ao Nível 1, quantas eram brancas |
+| Truncado, erro do Nível 1, observação | o que impediu a tool de olhar o documento inteiro |
+
+O filtro abre em **só erros** (falso ✅ e falso ❌) e dá para restringir por
+estrato; "Tudo" traz os acertos para comparar. Cada cartão tem botões de **causa**
+— `modelo`, `rotulagem`, `documento`, `rever` —, que é a classificação que separa
+"o detector errou" de "eu rotulei errado" de "o documento estava quebrado". A
+escolha fica no `localStorage` do navegador e sai pelo botão **Baixar triagem
+(JSON)**; nada é gravado em disco, e o `rotulos.jsonl` não é tocado — mudar de
+ideia sobre um rótulo é `validar.py rotular`.
+
+### Voltar para o rotulador (`validar.py rotular --rever`)
+
+O JSON da triagem alimenta o rotulador de volta:
+
+```bash
+poc-assinatura$ .venv/Scripts/python validar.py rotular --rever triagem-erros.json
+poc-assinatura$ .venv/Scripts/python validar.py avaliar
+```
+
+A fila passa a ser **só** os documentos com causa `rever` ou `rotulagem` — os que
+pedem rótulo novo. `modelo` e `documento` ficam de fora de propósito: neles o
+rótulo já foi dado por bom, e trazê-los de volta seria reetiquetar até a tool
+concordar. O rótulo novo substitui o antigo (a imagem muda de pasta e a última
+linha do `rotulos.jsonl` vence), e `avaliar` recalcula tudo.
+
+> Corrigir rótulo só onde a tool errou **empurra a acurácia para cima sozinho**:
+> os rótulos errados que por acaso concordaram com a tool continuam lá, e nunca
+> passam por revisão. O número que sai depois disso é um teto, não a mesma
+> medida de antes. Para uma correção sem esse viés, o caminho é rever uma fatia
+> aleatória da amostra inteira — inclusive acertos — e não só as divergências.
+
+### O sinal do AcroForm (`validar.py acroform`)
+
+O Nível 0 conta a **presença do widget** `/Sig`. Um formulário com "assine aqui"
+nunca preenchido tem widget e não tem assinatura — a hipótese de falso positivo
+que este comando mede:
+
+```bash
+poc-assinatura$ .venv/Scripts/python validar.py acroform --n 100
+```
+
+Sorteia `--n` documentos por grupo (AcroForm como **única** evidência × AcroForm
+acompanhado de carimbo/Nível 1), um por conteúdo distinto, reabre cada PDF e lê
+o que decide:
+
+| No PDF | Significa |
+|---|---|
+| campo `/FT /Sig` **sem** `/V` | placeholder — campo em branco, falso positivo |
+| `/V` com `/ByteRange` e `/Contents` preenchido | assinado: há PKCS#7 no arquivo |
+| `/V` sem `/ByteRange` ou `/Contents` vazio | assinatura preparada e não concluída |
+
+**O nome do signatário não decide nada.** `/V /Name` é opcional e vem vazio na
+maioria dos PDFs do ICP-Brasil, e `widget.field_value` devolve `""` mesmo em
+assinatura válida — concluir "campo vazio" a partir do nome vazio inverte o
+diagnóstico. O nome real está dentro do certificado, e o relatório o extrai por
+heurística (cadeias em caixa alta do PKCS#7).
+
+Saem `auditoria/ACROFORM.md` (veredito por grupo, projeção do falso positivo
+para o lote e o detalhe campo a campo) e `auditoria/ACROFORM.jsonl`. A auditoria
+verifica que **existe** assinatura criptográfica, não que ela é **válida** —
+cadeia ICP e integridade exigiriam um verificador de certificado.
+
+Os cartões são por **conteúdo** (sha256), não por documento: o mesmo conteúdo
+duplicado 96 vezes é uma imagem e uma decisão só, com a contagem de cópias no
+cartão. Por isso a soma dos cartões de erro pode ficar abaixo dos erros da matriz
+de confusão do `VALIDACAO.md`, que conta documentos.
 
 ### A régua, que precisa estar combinada antes de começar
 
@@ -298,7 +382,7 @@ a instrução — em vez de rodar o lote inteiro e devolver "0 assinaturas no N�
 | [`processar.py`](processar.py) | entrada da linha de comando do lote |
 | [`processamento/`](processamento/) | descoberta e adaptação de formato, execução do lote, amostragem de hardware, relatórios |
 | [`validar.py`](validar.py) | entrada da linha de comando da auditoria de acurácia |
-| [`validacao/`](validacao/) | sha256, estratos, sorteio e folhas de contato (`amostra.py`); rotulador local (`rotulagem.py`); matriz de confusão, Wilson e `VALIDACAO.md` (`metricas.py`) |
+| [`validacao/`](validacao/) | sha256, estratos, sorteio e folhas de contato (`amostra.py`); rotulador local (`rotulagem.py`); matriz de confusão, Wilson e `VALIDACAO.md` (`metricas.py`); triagem dos erros em `ERROS.html` (`erros.py`); auditoria do campo `/Sig` (`acroform.py`) |
 | [`tool_validar_assinatura/`](tool_validar_assinatura/) | a tool de detecção (Nível 0 + Nível 1) |
 | [`compat/`](compat/) | recorte das funções do `motor_ia` que a tool importa — existe só porque esta cópia roda fora do repositório do motor-ia. Com o pacote real instalado, é ele que vence |
 | [`tests/`](tests/) | testes da plataforma (`.venv/Scripts/python -m pytest tests -q`) |

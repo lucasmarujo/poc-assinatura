@@ -5,7 +5,9 @@ PyMuPDF + numpy, nenhuma chamada de rede/serviço pago):
 
   1. **Campos `/Sig` no AcroForm** — assinatura criptográfica viva no PDF
      (PAdES/ICP-Brasil). Sinal mais forte quando presente. Reaproveita
-     `motor_ia.extractors.signatures.find_embedded_pdf_signatures`.
+     `motor_ia.extractors.signatures.find_embedded_pdf_signatures` e descarta o
+     que ela não tem como distinguir: campo de assinatura **em branco**, que é
+     widget sem `/V` — o "assine aqui" de um formulário, não uma assinatura.
   2. **Camada de texto — carimbo digital** — "Assinado digitalmente por…",
      "ICP-Brasil", "DN: C=" etc. Reaproveita
      `motor_ia.extractors.signatures.find_digital_signatures`, que já cobre o
@@ -47,6 +49,10 @@ _ROTULO_ASSINATURA_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"recebi\s+(?:o|a|as|os)\s+\w+",
     )
 )
+
+# Campo de assinatura no AcroForm (PyMuPDF: PDF_WIDGET_TYPE_SIGNATURE == 6).
+# Repetido de `motor_ia.extractors.signatures`, onde é privado.
+TIPO_WIDGET_ASSINATURA = 6
 
 # Triagem de tinta: rasteriza em DPI baixo (rápido) e conta pixels escuros.
 # 72 DPI numa A4 dá ~0,5 MP — suficiente para distinguir folha em branco de
@@ -168,6 +174,68 @@ def triar_paginas(
         doc.close()
 
 
+def campos_assinados(path: str | Path) -> set[tuple[int, str | None]]:
+    """`(página, nome do campo)` dos campos `/Sig` com assinatura **viva**.
+
+    Assinatura viva é `/V` apontando para um dicionário com `/ByteRange` (o
+    trecho do arquivo que foi assinado) e `/Contents` (o PKCS#7). Campo sem
+    `/V` é o "assine aqui" de um formulário: existe o lugar, não existe a
+    assinatura.
+
+    O nome do signatário **não** entra no critério: `/V /Name` é opcional e vem
+    vazio na maioria dos PDFs do ICP-Brasil — em auditoria de 200 documentos
+    deste lote, 67% dos campos assinados tinham `/Name` vazio. Usá-lo aqui
+    descartaria assinatura válida em massa.
+    """
+    import pymupdf as _pymupdf
+
+    pymupdf = cast(Any, _pymupdf)
+    doc = pymupdf.open(str(path))
+    try:
+        assinados: set[tuple[int, str | None]] = set()
+        for indice in range(doc.page_count):
+            for widget in doc[indice].widgets() or []:
+                if getattr(widget, "field_type", None) != TIPO_WIDGET_ASSINATURA:
+                    continue
+                if _tem_assinatura_viva(doc, widget.xref):
+                    assinados.add((indice + 1, getattr(widget, "field_name", None)))
+        return assinados
+    finally:
+        doc.close()
+
+
+def _tem_assinatura_viva(doc: Any, xref_widget: int) -> bool:
+    valor = doc.xref_get_key(xref_widget, "V")
+    if not valor or valor[0] != "xref":
+        return False
+    xref_valor = int(valor[1].split()[0])
+    byte_range = doc.xref_get_key(xref_valor, "ByteRange")
+    if not byte_range or byte_range[0] != "array":
+        return False
+    numeros = [int(n) for n in re.findall(r"-?\d+", byte_range[1])]
+    if len(numeros) != 4 or numeros[0] < 0 or numeros[0] + numeros[1] > numeros[2]:
+        return False
+    conteudo = doc.xref_get_key(xref_valor, "Contents")
+    return bool(conteudo) and conteudo[0] != "null" and bool(conteudo[1].strip("<>() "))
+
+
+def somente_assinados(
+    assinaturas: list[dict[str, Any]], assinados: set[tuple[int, str | None]]
+) -> list[dict[str, Any]]:
+    """Descarta do resultado do AcroForm os campos em branco (pura).
+
+    Casa por `(página, nome do campo)`. Dois campos sem nome na mesma página
+    empatam na chave e passam juntos se um deles estiver assinado — erra para o
+    lado de manter a assinatura, que é o lado certo: descartar assinatura viva
+    seria trocar um falso positivo raro por um falso negativo.
+    """
+    return [
+        assinatura
+        for assinatura in assinaturas
+        if (assinatura.get("page"), assinatura.get("campo")) in assinados
+    ]
+
+
 def _texto_camada_digital(path: Path) -> str:
     """Texto da camada digital do PDF (sem OCR, sem custo)."""
     import pymupdf as _pymupdf
@@ -198,7 +266,7 @@ def detectar_nivel0(
     texto = texto_extraido if texto_extraido is not None else _texto_camada_digital(p)
     return ResultadoNivel0(
         digital=find_digital_signatures(texto),
-        embedded=find_embedded_pdf_signatures(p),
+        embedded=somente_assinados(find_embedded_pdf_signatures(p), campos_assinados(p)),
         paginas=triar_paginas(p, dpi=dpi_triagem, densidade_minima=densidade_minima),
         texto_extraido=texto,
     )

@@ -6,9 +6,11 @@ from pathlib import Path
 
 from nivel0 import (
     DENSIDADE_TINTA_MINIMA,
+    campos_assinados,
     densidade_tinta,
     detectar_nivel0,
     encontrar_rotulos_assinatura,
+    somente_assinados,
     triar_paginas,
 )
 
@@ -65,6 +67,41 @@ def test_formulario_sem_assinatura_nao_dispara_veredito(pdf_formulario: Path) ->
     assert resultado.total == 0
     assert resultado.tem_assinatura is False
     assert resultado.paginas[0].tem_rotulo_assinatura is True
+
+
+def test_campo_de_assinatura_em_branco_nao_e_assinatura(
+    pdf_campo_sig_em_branco: Path,
+) -> None:
+    """O widget `/Sig` sem `/V` é o "assine aqui" de um formulário. Contá-lo
+    aprova documento não assinado — era o falso positivo do AcroForm."""
+    resultado = detectar_nivel0(pdf_campo_sig_em_branco)
+
+    assert campos_assinados(pdf_campo_sig_em_branco) == set()
+    assert resultado.embedded == []
+    assert resultado.total == 0
+    assert resultado.tem_assinatura is False
+
+
+def test_campo_assinado_sem_nome_continua_valendo(pdf_campo_sig_assinado: Path) -> None:
+    """O outro lado do mesmo corte: `/V` com `/ByteRange` e PKCS#7 é assinatura,
+    ainda que `/Name` esteja vazio — que é o normal no ICP-Brasil."""
+    resultado = detectar_nivel0(pdf_campo_sig_assinado)
+
+    assert campos_assinados(pdf_campo_sig_assinado) == {(1, "Assinatura1")}
+    assert resultado.total == 1
+    assert resultado.fontes == ["pdf_embedded"]
+    assert resultado.tem_assinatura is True
+
+
+def test_somente_assinados_erra_para_o_lado_de_manter(  # noqa: D103
+) -> None:
+    assinaturas = [
+        {"tipo": "assinatura_pdf_embedded", "page": 1, "campo": "Assinatura1"},
+        {"tipo": "assinatura_pdf_embedded", "page": 2, "campo": "Assinatura2"},
+    ]
+
+    assert somente_assinados(assinaturas, {(1, "Assinatura1")}) == [assinaturas[0]]
+    assert somente_assinados(assinaturas, set()) == []
 
 
 def test_paginas_uteis_excluem_as_em_branco(pdf_com_pagina_em_branco: Path) -> None:

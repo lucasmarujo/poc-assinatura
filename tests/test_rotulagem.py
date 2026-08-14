@@ -95,6 +95,17 @@ def test_fila_ignora_item_sem_imagem(tmp_path: Path) -> None:
     assert [i.id for i in fila(itens, pasta, semente=42)] == [itens[0].id]
 
 
+def test_fila_recorta_aos_ids_marcados_na_triagem(tmp_path: Path) -> None:
+    """Modo revisão: só os documentos marcados, mesmo já tendo rótulo."""
+    itens = [_item(i) for i in range(5)]
+    pasta = _amostra_com_imagens(tmp_path, itens)
+    marcados = {itens[1].id, itens[3].id}
+
+    recortada = fila(itens, pasta, semente=42, apenas=marcados)
+
+    assert {item.id for item in recortada} == marcados
+
+
 # ---------- página ------------------------------------------------------------
 
 
@@ -121,6 +132,18 @@ def test_pagina_ja_vem_com_o_que_foi_rotulado_antes() -> None:
     dados = json.loads(pagina.split("const DADOS = ", 1)[1].split(";\n", 1)[0])
     assert dados["rotulos"] == {itens[0].id: "sim", itens[1].id: "duvida"}
     assert len(dados["fila"]) == 3
+    assert dados["revisar"] is False
+
+
+def test_pagina_em_revisao_abre_no_primeiro_mesmo_com_tudo_rotulado() -> None:
+    """Sem o flag, a página pularia para o fim: na revisão todos já têm rótulo."""
+    itens = [_item(1), _item(2)]
+
+    pagina = montar_pagina(itens, {item.sha256: True for item in itens}, revisar=True)
+
+    dados = json.loads(pagina.split("const DADOS = ", 1)[1].split(";\n", 1)[0])
+    assert dados["revisar"] is True
+    assert len(dados["fila"]) == 2
 
 
 # ---------- aplicar rótulo ----------------------------------------------------

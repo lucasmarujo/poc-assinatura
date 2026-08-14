@@ -27,7 +27,7 @@ import os
 import random
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -66,17 +66,27 @@ LIMITE_CORPO_BYTES = 4096
 ROTA_IMAGENS = f"{NOME_AMOSTRA}/{PASTA_PENDENTES}"
 
 
-def fila(itens: list[ItemAmostra], pasta_amostra: Path, *, semente: Any = 42) -> list[ItemAmostra]:
+def fila(
+    itens: list[ItemAmostra],
+    pasta_amostra: Path,
+    *,
+    semente: Any = 42,
+    apenas: Collection[str] | None = None,
+) -> list[ItemAmostra]:
     """Um item por conteúdo distinto que tem imagem, em ordem embaralhada.
 
     Determinística pela semente: reabrir o rotulador continua na mesma ordem, e
     o "faltam 120" de ontem continua sendo os mesmos 120.
+
+    `apenas` recorta a fila a um conjunto de ids — é o modo revisão, em que a
+    fila é a lista de documentos marcados na triagem e todos já têm rótulo.
     """
     por_conteudo = {item.sha256: item for item in itens}
     com_imagem = [
         item
         for item in sorted(por_conteudo.values(), key=lambda i: i.id)
-        if localizar_imagem(pasta_amostra, item.id) is not None
+        if (apenas is None or item.id in apenas)
+        and localizar_imagem(pasta_amostra, item.id) is not None
     ]
     random.Random(f"{semente}:fila").shuffle(com_imagem)
     return com_imagem
@@ -134,12 +144,16 @@ def gravar_rotulo(caminho_jsonl: Path, sha256: str, rotulo: str) -> None:
 
 
 def _bootstrap(
-    itens: list[ItemAmostra], rotulos: dict[str, bool | None]
+    itens: list[ItemAmostra], rotulos: dict[str, bool | None], *, revisar: bool = False
 ) -> str:
     """O JSON que a página recebe: a fila e o que já está decidido.
 
     Só `id` — nem caminho, nem estrato, nem o veredito da tool. A página não tem
     como revelar o que não recebeu.
+
+    `revisar` só muda por onde a página começa: na fila normal ela pula para o
+    primeiro sem rótulo, e no modo revisão *todos* já têm rótulo — sem o flag,
+    ela abriria direto em "fila concluída".
     """
     por_valor = {True: "sim", False: "nao", None: "duvida"}
     return json.dumps(
@@ -150,6 +164,7 @@ def _bootstrap(
                 for item in itens
                 if item.sha256 in rotulos
             },
+            "revisar": revisar,
         },
         ensure_ascii=False,
     )
@@ -214,13 +229,17 @@ const DADOS = __DADOS__;
 const fila = DADOS.fila, rotulos = DADOS.rotulos;
 const folha = document.getElementById('folha');
 const fim = document.getElementById('fim');
-let i = fila.findIndex(id => !(id in rotulos));
+// Revisão: a fila inteira já tem rótulo, então começa no primeiro e a barra
+// mede o quanto da revisão andou, não quanto está rotulado.
+const revisados = new Set();
+let i = DADOS.revisar ? 0 : fila.findIndex(id => !(id in rotulos));
 if (i < 0) i = fila.length;
 
 function pintar() {
-  const decididos = Object.keys(rotulos).length;
-  document.getElementById('contagem').textContent =
-    `${decididos} de ${fila.length} rotulados · faltam ${fila.length - decididos}`;
+  const decididos = DADOS.revisar ? revisados.size : Object.keys(rotulos).length;
+  document.getElementById('contagem').textContent = DADOS.revisar
+    ? `revisão · ${decididos} de ${fila.length} revistos`
+    : `${decididos} de ${fila.length} rotulados · faltam ${fila.length - decididos}`;
   document.getElementById('feito').style.width =
     (fila.length ? decididos / fila.length * 100 : 0) + '%';
   const acabou = i >= fila.length || i < 0;
@@ -252,6 +271,7 @@ async function rotular(rotulo) {
     });
     if (!resposta.ok) { alert('Não consegui gravar: ' + await resposta.text()); return; }
     rotulos[id] = rotulo;
+    revisados.add(id);
     i++;
     pintar();
   } finally {
@@ -283,10 +303,12 @@ pintar();
 """
 
 
-def montar_pagina(itens: list[ItemAmostra], rotulos: dict[str, bool | None]) -> str:
+def montar_pagina(
+    itens: list[ItemAmostra], rotulos: dict[str, bool | None], *, revisar: bool = False
+) -> str:
     """A página com a fila embutida. `replace`, não `format`: o CSS/JS é cheio
     de `{}` e `str.format` os interpretaria como campo."""
-    return PAGINA.replace("__DADOS__", _bootstrap(itens, rotulos))
+    return PAGINA.replace("__DADOS__", _bootstrap(itens, rotulos, revisar=revisar))
 
 
 def criar_servidor(
@@ -297,13 +319,14 @@ def criar_servidor(
     caminho_rotulos: Path,
     porta: int = PORTA_DEFAULT,
     ao_rotular: Callable[[str, str, int], None] | None = None,
+    revisar: bool = False,
 ) -> ThreadingHTTPServer:
     """Servidor do rotulador, preso a `127.0.0.1`.
 
     Só localhost: é ferramenta de mesa sobre documento de trabalhador, não pode
     ficar exposta na rede da máquina por descuido de bind.
     """
-    pagina = montar_pagina(itens, rotulos).encode("utf-8")
+    pagina = montar_pagina(itens, rotulos, revisar=revisar).encode("utf-8")
     sha_por_id = {item.id: item.sha256 for item in itens}
     decididos = {item.id for item in itens if item.sha256 in rotulos}
 

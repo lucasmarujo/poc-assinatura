@@ -16,7 +16,7 @@ Cascata de dois níveis; o barato decide primeiro.
 
 | Sinal | O que faz | Origem |
 |---|---|---|
-| Campos `/Sig` no AcroForm | assinatura criptográfica viva no PDF (PAdES/ICP-Brasil) | reusa `motor_ia.extractors.signatures.find_embedded_pdf_signatures` |
+| Campos `/Sig` no AcroForm | assinatura criptográfica viva no PDF (PAdES/ICP-Brasil) | reusa `motor_ia.extractors.signatures.find_embedded_pdf_signatures` e descarta campo em branco (widget sem `/V`) |
 | Carimbo na camada de texto | "Assinado digitalmente por…", ICP-Brasil, `DN: C=` | reusa `motor_ia.extractors.signatures.find_digital_signatures` |
 | Rótulo de assinatura | "Assinatura do empregado", "Recebi…" — indício de *campo*, não de assinatura; **não** entra no veredito | novo |
 | Densidade de tinta | fração de pixels escuros por página (raster 72 DPI, grayscale); abaixo do limiar a página é **em branco** e não vai ao Nível 1 | novo |

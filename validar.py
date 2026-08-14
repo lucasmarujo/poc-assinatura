@@ -3,12 +3,26 @@
     poc-assinatura$ .venv/Scripts/python validar.py amostrar      # Windows
     poc-assinatura$ ./.venv/bin/python validar.py amostrar        # Linux/macOS
 
-Três passos:
+Três passos, mais um para depois de ver o número:
 
     1) validar.py amostrar     sorteia a amostra e gera as imagens a rotular
     2) validar.py rotular      abre o rotulador no navegador: S / N / D por
                                documento, gravando a cada clique
     3) validar.py avaliar      cruza rótulo × veredito e escreve VALIDACAO.md
+    4) validar.py erros        abre ERROS.html: cada divergência com a imagem
+                               rotulada ao lado da evidência que a tool usou
+                               (AcroForm /Sig, carimbo, Nível 1, fallback 3×3)
+
+Marcou documentos como `rever`/`rotulagem` na triagem? Volte para o rotulador só
+com eles e depois reavalie:
+
+    validar.py rotular --rever triagem-erros.json
+    validar.py avaliar
+
+E, para auditar o sinal do AcroForm em si — se o campo `/Sig` está mesmo assinado
+ou é só um "assine aqui" em branco:
+
+    validar.py acroform --n 25
 
 Nada em `files/` é lido para escrita em momento nenhum: a imagem que aparece no
 rotulador é uma cópia renderizada em `auditoria/amostra/`, e rotular só a vincula
@@ -43,13 +57,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from processamento import RAIZ
 from processamento.relatorio import ler_registros
+from validacao import acroform
 from validacao import amostra as amostragem
+from validacao import erros as triagem
 from validacao import metricas, rotulagem
 
 FILES_DEFAULT = RAIZ / "files"
@@ -75,17 +92,44 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     comandos = parser.add_subparsers(dest="comando", required=True)
 
-    for nome in ("amostrar", "rotular", "avaliar"):
+    for nome in ("amostrar", "rotular", "avaliar", "erros", "acroform"):
         comando = comandos.add_parser(nome)
         comando.add_argument("--files", type=Path, default=FILES_DEFAULT)
         comando.add_argument("--resultados", type=Path, default=RESULTADOS_DEFAULT)
         comando.add_argument("--saida", type=Path, default=SAIDA_DEFAULT)
+        if nome == "erros":
+            comando.add_argument(
+                "--sem-navegador",
+                action="store_true",
+                help="não abre o navegador sozinho (só imprime o caminho)",
+            )
+        if nome == "acroform":
+            comando.add_argument(
+                "--n",
+                type=int,
+                default=25,
+                help=(
+                    "documentos por grupo (só AcroForm / AcroForm + outra evidência); "
+                    "o default audita 50 no total"
+                ),
+            )
+            comando.add_argument("--semente", type=int, default=42)
         if nome == "rotular":
             comando.add_argument("--porta", type=int, default=rotulagem.PORTA_DEFAULT)
             comando.add_argument(
                 "--sem-navegador",
                 action="store_true",
                 help="não abre o navegador sozinho (só imprime a URL)",
+            )
+            comando.add_argument(
+                "--rever",
+                type=Path,
+                help=(
+                    "JSON baixado da triagem (`validar.py erros`): a fila passa a ser "
+                    "só os documentos com causa "
+                    f"{' ou '.join(sorted(triagem.CAUSAS_REVER))}, já rotulados, para "
+                    "receberem um rótulo novo"
+                ),
             )
         if nome == "amostrar":
             comando.add_argument("--n-negativos", type=int, default=200)
@@ -237,7 +281,25 @@ def rotular(args: argparse.Namespace) -> int:
     pasta_amostra = args.saida / amostragem.NOME_AMOSTRA
     caminho_rotulos = args.saida / amostragem.NOME_ROTULOS
     parametros = _parametros_da_amostra(args.saida)
-    itens = rotulagem.fila(indice, pasta_amostra, semente=parametros.get("semente", 42))
+
+    apenas: list[str] | None = None
+    if args.rever is not None:
+        try:
+            apenas = triagem.ids_para_rever(args.rever)
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            print(f"Não consegui ler a triagem em {args.rever}: {exc}", file=sys.stderr)
+            return 1
+        if not apenas:
+            print(
+                f"Nenhum documento com causa "
+                f"{' ou '.join(sorted(triagem.CAUSAS_REVER))} em {args.rever}.",
+                file=sys.stderr,
+            )
+            return 1
+
+    itens = rotulagem.fila(
+        indice, pasta_amostra, semente=parametros.get("semente", 42), apenas=apenas
+    )
     if not itens:
         print(
             f"Nenhuma imagem em {pasta_amostra / amostragem.PASTA_PENDENTES}. "
@@ -264,11 +326,20 @@ def rotular(args: argparse.Namespace) -> int:
         caminho_rotulos=caminho_rotulos,
         porta=args.porta,
         ao_rotular=anunciar,
+        revisar=apenas is not None,
     )
     url = f"http://127.0.0.1:{servidor.server_address[1]}/"
+    situacao = (
+        f"{len(itens)} imagem(ns) marcada(s) na triagem, todas já rotuladas — o rótulo "
+        "novo substitui o antigo.\n"
+        "Julgue a imagem, não o que a tool decidiu: rever só o que ela errou já puxa a "
+        "acurácia para cima sozinho."
+        if apenas is not None
+        else f"{len(itens)} imagens na fila, {faltam} sem rótulo."
+    )
     print(
         f"Rotulador em {url}\n"
-        f"{len(itens)} imagens na fila, {faltam} sem rótulo.\n"
+        f"{situacao}\n"
         "Teclas: S = tem assinatura · N = não tem · D = dúvida · ← volta · → pula.\n"
         "Cada clique grava na hora. Ctrl+C encerra; depois rode `validar.py avaliar`.",
         file=sys.stderr,
@@ -315,6 +386,81 @@ def avaliar(args: argparse.Namespace) -> int:
     return 0
 
 
+def erros(args: argparse.Namespace) -> int:
+    """Gera a página de triagem dos erros a partir do que `avaliar` consolidou."""
+    import webbrowser
+
+    registros = _carregar_registros(args.resultados)
+    if registros is None:
+        return 1
+
+    indice = args.saida / amostragem.NOME_INDICE
+    if not indice.is_file():
+        print(
+            f"Amostra não encontrada: {indice}\nRode `validar.py amostrar` antes.",
+            file=sys.stderr,
+        )
+        return 1
+
+    caminho, contagem = triagem.gerar(
+        registros=registros, pasta_saida=args.saida, raiz_files=args.files
+    )
+    if not sum(contagem.values()):
+        print(
+            "Nenhum conteúdo rotulado em "
+            f"`{args.saida / amostragem.NOME_ROTULOS}` — rode `validar.py rotular` e "
+            "`validar.py avaliar` antes.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"\n{caminho}\n"
+        f"  {contagem['fn']} falso ❌ · {contagem['fp']} falso ✅ · "
+        f"{contagem['duvida']} dúvida · {contagem['vp'] + contagem['vn']} acertos",
+        file=sys.stderr,
+    )
+    if not args.sem_navegador:
+        webbrowser.open(caminho.resolve().as_uri())
+    return 0
+
+
+def auditar_acroform(args: argparse.Namespace) -> int:
+    """Reabre PDFs com sinal `pdf_embedded` e checa se o campo `/Sig` tem `/V`."""
+    registros = _carregar_registros(args.resultados)
+    if registros is None:
+        return 1
+
+    def anunciar(feitos: int, total: int, arquivo: str) -> None:
+        print(f"  [{feitos}/{total}] {arquivo}", file=sys.stderr)
+
+    caminhos, linhas = acroform.gerar(
+        registros=registros,
+        raiz_files=args.files,
+        pasta_saida=args.saida,
+        n_por_grupo=args.n,
+        semente=args.semente,
+        ao_progredir=anunciar,
+    )
+    if not linhas:
+        print(
+            "Nenhum documento com sinal `pdf_embedded` no checkpoint — nada a auditar.",
+            file=sys.stderr,
+        )
+        return 1
+
+    contagem = Counter(linha["veredito"] for linha in linhas)
+    print(
+        "\n"
+        + " · ".join(f"{chave}: {contagem[chave]}" for chave in acroform.DESCRICAO_VEREDITO)
+        + "\n",
+        file=sys.stderr,
+    )
+    for caminho in caminhos.values():
+        print(f"  {caminho}", file=sys.stderr)
+    return 0
+
+
 def _parametros_da_amostra(pasta_saida: Path) -> dict[str, Any]:
     """O desenho da amostra, gravado por `amostrar`. Ausente não é erro: o
     relatório só perde a linha que declara a semente."""
@@ -333,6 +479,10 @@ def main(argv: list[str] | None = None) -> int:
         return amostrar(args)
     if args.comando == "rotular":
         return rotular(args)
+    if args.comando == "erros":
+        return erros(args)
+    if args.comando == "acroform":
+        return auditar_acroform(args)
     return avaliar(args)
 
 

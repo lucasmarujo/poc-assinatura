@@ -1,0 +1,170 @@
+[
+  {
+    "id": "382b0db9beef",
+    "classe": "fn",
+    "estrato": "neg_imagem",
+    "causa": "modelo"
+  },
+  {
+    "id": "13d99642617d",
+    "classe": "fn",
+    "estrato": "neg_imagem",
+    "causa": "modelo"
+  },
+  {
+    "id": "c2bc3cb6f3e2",
+    "classe": "fn",
+    "estrato": "neg_imagem",
+    "causa": "rever"
+  },
+  {
+    "id": "d2e4cd424bd0",
+    "classe": "fn",
+    "estrato": "neg_imagem",
+    "causa": "modelo"
+  },
+  {
+    "id": "a5278f5b05ed",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "2bc2bbdfb073",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "e47a4c7b1b1f",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "d491022df070",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "5deb8509a3c7",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "2e51500dea55",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "be18f9dea294",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "275624be0001",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "rever"
+  },
+  {
+    "id": "1f02828c657b",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "3e5916caca45",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "30afd0db19fa",
+    "classe": "fn",
+    "estrato": "neg_pdf_1pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "29e93d045ed4",
+    "classe": "fn",
+    "estrato": "neg_pdf_2pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "a8356200ef33",
+    "classe": "fn",
+    "estrato": "neg_pdf_2pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "d082fe6cc4b9",
+    "classe": "fn",
+    "estrato": "neg_pdf_2pag",
+    "causa": "modelo"
+  },
+  {
+    "id": "ace5be150d8b",
+    "classe": "fn",
+    "estrato": "neg_pdf_3pag_ou_mais",
+    "causa": "modelo"
+  },
+  {
+    "id": "181bf4b322d5",
+    "classe": "fp",
+    "estrato": "pos_nivel0",
+    "causa": "documento"
+  },
+  {
+    "id": "91676bda7bd8",
+    "classe": "fp",
+    "estrato": "pos_nivel0",
+    "causa": "rever"
+  },
+  {
+    "id": "97a65d3184f6",
+    "classe": "fp",
+    "estrato": "pos_nivel0",
+    "causa": "rotulagem"
+  },
+  {
+    "id": "baf52fe9ad11",
+    "classe": "fp",
+    "estrato": "pos_nivel0",
+    "causa": "documento"
+  },
+  {
+    "id": "bff654980b32",
+    "classe": "fp",
+    "estrato": "pos_nivel1_varias",
+    "causa": "modelo"
+  },
+  {
+    "id": "0dd750d9020f",
+    "classe": "fp",
+    "estrato": "pos_resgatado_fallback",
+    "causa": "modelo"
+  },
+  {
+    "id": "e4fc10b5645f",
+    "classe": "fp",
+    "estrato": "pos_resgatado_fallback",
+    "causa": "modelo"
+  },
+  {
+    "id": "4eae089861ad",
+    "classe": "fp",
+    "estrato": "pos_resgatado_fallback",
+    "causa": "modelo"
+  },
+  {
+    "id": "16e6d4165bd0",
+    "classe": "fp",
+    "estrato": "pos_resgatado_fallback",
+    "causa": "modelo"
+  }
+]
